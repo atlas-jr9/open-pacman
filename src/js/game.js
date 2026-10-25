@@ -12,6 +12,7 @@ const OPPOSITE = { left: 'right', right: 'left', up: 'down', down: 'up' };
 
 const PACMAN_SPEED = 0.125; // 1/8 celda/frame -> alinea cada 8 frames
 const GHOST_SPEED = 0.1;    // 1/10 celda/frame
+const RELEASE_INTERVAL = 80; // frames @60fps ≈ 1.33s entre fantasmas liberados
 
 // Crea una partida nueva. Copia MAZE (pristino) a game.grid para poder comer
 // dots sin destruir el original, y reiniciar.
@@ -36,12 +37,15 @@ function createGame() {
       nextDir: null,
       speed: PACMAN_SPEED,
     },
-    ghosts: GHOST_STARTS.map( ( g ) => ( {
+    releaseClock: 0,   // frames desde la ultima liberacion
+    releasedCount: 1,   // el agresivo ya sale al inicio
+    ghosts: GHOST_STARTS.map( ( g, i ) => ( {
       x: g.x,
       y: g.y,
       dir: 'up',
       speed: GHOST_SPEED,
       kind: g.kind,
+      released: i < 1, // solo el primero (aggressive) arranca en juego
     } ) ),
   };
 }
@@ -110,38 +114,64 @@ function movePacman( game ) {
   wrapTunnel( p, width );
 }
 
+// Objetivo segun el kind del fantasma (estilo arcade):
+//   aggressive -> posicion actual de Pacman
+//   ambusher   -> 4 celdas por delante de Pacman
+//   flanker    -> 2 celdas por delante de Pacman
+//   random     -> sin objetivo (elegira al azar en decideGhost)
+function getTarget( game, g ) {
+  const p = game.pacman;
+  const px = Math.round( p.x );
+  const py = Math.round( p.y );
+
+  if ( g.kind === 'aggressive' ) return { x: px, y: py };
+
+  const ahead = g.kind === 'ambusher' ? 4 : g.kind === 'flanker' ? 2 : 0;
+  if ( !ahead ) return null; // random y companeros sin objetivo
+
+  const d = DIRS[ p.dir ] || DIRS.left;
+  const width = game.grid[ 0 ].length;
+  const height = game.grid.length;
+  // Se mantiene el punto dentro del tablero (evita coordenadas fuera de rango).
+  const tx = Math.min( Math.max( px + d.x * ahead, 0 ), width - 1 );
+  const ty = Math.min( Math.max( py + d.y * ahead, 0 ), height - 1 );
+  return { x: tx, y: ty };
+}
+
+// Elige la direccion legal mas cercana al objetivo (distancia Manhattan),
+// sin giro de 180 salvo en callejon. 'random' elige al azar.
 function decideGhost( game, g ) {
   const grid = game.grid;
-  const p = game.pacman;
 
   const options = Object.keys( DIRS ).filter(
     ( dir ) => dir !== OPPOSITE[ g.dir ] && canMove( grid, g.x, g.y, dir, 'ghost' )
   );
   // Sin salida (callejon): permitir el giro de 180.
-  const choices = options.length ? options : [ '' + OPPOSITE[ g.dir ] ];
+  const choices = options.length ? options : [ OPPOSITE[ g.dir ] ];
 
-  if ( g.kind === 'hunter' ) {
-    const px = Math.round( p.x );
-    const py = Math.round( p.y );
-    let best = choices[ 0 ];
-    let bestDist = Infinity;
-    for ( const dir of choices ) {
-      const d = DIRS[ dir ];
-      const nx = g.x + d.x;
-      const ny = g.y + d.y;
-      const dist = Math.abs( nx - px ) + Math.abs( ny - py );
-      if ( dist < bestDist ) {
-        bestDist = dist;
-        best = dir;
-      }
-    }
-    g.dir = best;
-  } else {
+  if ( g.kind === 'random' ) {
     g.dir = choices[ Math.floor( Math.random() * choices.length ) ];
+    return;
   }
+
+  const target = getTarget( game, g );
+  let best = choices[ 0 ];
+  let bestDist = Infinity;
+  for ( const dir of choices ) {
+    const d = DIRS[ dir ];
+    const nx = g.x + d.x;
+    const ny = g.y + d.y;
+    const dist = Math.abs( nx - target.x ) + Math.abs( ny - target.y );
+    if ( dist < bestDist ) {
+      bestDist = dist;
+      best = dir;
+    }
+  }
+  g.dir = best;
 }
 
 function moveGhost( game, g ) {
+  if ( !g.released ) return; // aun en la pen: espera su turno de liberacion
   const grid = game.grid;
   const width = grid[ 0 ].length;
 
@@ -176,6 +206,18 @@ function collides( a, b ) {
 }
 
 function update( game ) {
+  // Cola de liberacion de la pen: un fantasma cada RELEASE_INTERVAL frames.
+  // Se cuenta solo mientras queden fantasmas sin liberar; al perder una vida
+  // no se reinicia (resetPositions no toca estos contadores).
+  if ( game.releasedCount < game.ghosts.length ) {
+    game.releaseClock++;
+    if ( game.releaseClock >= RELEASE_INTERVAL ) {
+      game.ghosts[ game.releasedCount ].released = true;
+      game.releasedCount++;
+      game.releaseClock = 0;
+    }
+  }
+
   movePacman( game );
   game.ghosts.forEach( ( g ) => moveGhost( game, g ) );
 
