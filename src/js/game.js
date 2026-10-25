@@ -12,7 +12,7 @@ const OPPOSITE = { left: 'right', right: 'left', up: 'down', down: 'up' };
 
 const PACMAN_SPEED = 0.125; // 1/8 celda/frame -> alinea cada 8 frames
 const GHOST_SPEED = 0.1;    // 1/10 celda/frame
-const RELEASE_INTERVAL = 90; // frames @60fps = 1.5s entre fantasmas liberados
+const RELEASE_INTERVAL = 80; // frames @60fps ≈ 1.33s entre fantasmas liberados
 
 // Crea una partida nueva. Copia MAZE (pristino) a game.grid para poder comer
 // dots sin destruir el original, y reiniciar.
